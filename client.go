@@ -26,21 +26,30 @@ func New() (*Client, error) {
 		return nil, err
 	}
 
-	client, err := newClient(c)
+	// The genetlink connection must be closed if an error occurs to avoid
+	// leaking files.
+
+	group, err := getGroup(c)
 	if err != nil {
-		// Close the genetlink connection to avoid leaking files on error.
 		_ = c.Close()
 		return nil, err
 	}
 
-	return client, nil
+	// genltest does not currently support joining groups, so we have to return
+	// the group back to this function to join it for the real connection.
+	if err := c.JoinGroup(group); err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+
+	return &Client{c: c}, nil
 }
 
-// newClient is the entry point for tests.
-func newClient(c *genetlink.Conn) (*Client, error) {
+// getGroup is the entry point for tests.
+func getGroup(c *genetlink.Conn) (uint32, error) {
 	f, err := c.GetFamily(familyName)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	// Determine the ID of the events multicast group.
@@ -52,14 +61,10 @@ func newClient(c *genetlink.Conn) (*Client, error) {
 		}
 	}
 	if id == 0 {
-		return nil, fmt.Errorf("quota: could not find %q multicast group", groupName)
+		return 0, fmt.Errorf("quota: could not find %q multicast group", groupName)
 	}
 
-	if err := c.JoinGroup(id); err != nil {
-		return nil, err
-	}
-
-	return &Client{c: c}, nil
+	return id, nil
 }
 
 // Close releases resources used by a Client.
